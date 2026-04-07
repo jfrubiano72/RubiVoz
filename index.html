@@ -335,24 +335,7 @@ input.ip-range{width:100%;accent-color:var(--gold);cursor:pointer;}
 </head>
 <body>
 
-<!-- API KEY SCREEN -->
-<div class="apikey-screen" id="apikeyScreen" style="display:none;">
-  <div class="apikey-card">
-    <div class="apikey-logo">VT</div>
-    <div class="apikey-title">VoiceTone Analyzer</div>
-    <div class="apikey-sub">Para activar el análisis necesitas tu API Key de Anthropic. Se guarda solo en tu navegador — nunca en ningún servidor.</div>
-    <input class="apikey-input" type="password" id="apikeyInput" placeholder="sk-ant-api03-...">
-    <div class="apikey-hint">
-      Obtén tu key gratis en <a href="https://console.anthropic.com/settings/keys" target="_blank">console.anthropic.com</a> → API Keys → Create Key.<br>
-      El costo es ~$0.003 USD por análisis.
-    </div>
-    <div class="apikey-error" id="apikeyError">Key inválida. Debe empezar con sk-ant- y tener más de 30 caracteres.</div>
-    <button class="btn-p" id="apikeyBtn" style="width:100%;">Activar análisis →</button>
-    <div style="margin-top:10px;text-align:center;">
-      <button onclick="document.getElementById('apikeyScreen').style.display='none';" style="background:none;border:none;font-size:12px;color:var(--gray400);cursor:pointer;font-family:'DM Sans',sans-serif;">Continuar sin IA (solo sliders)</button>
-    </div>
-  </div>
-</div>
+
 
 <!-- HEADER -->
 <div class="header">
@@ -364,7 +347,7 @@ input.ip-range{width:100%;accent-color:var(--gold);cursor:pointer;}
     </div>
   </div>
   <div style="display:flex;align-items:center;gap:10px;">
-    <button id="headerKeyBtn" onclick="showApiKeyScreen();" style="background:transparent;border:1px solid rgba(200,150,62,.4);color:var(--gold);font-size:11px;padding:4px 12px;border-radius:20px;cursor:pointer;font-family:DM Sans,sans-serif;">⚙ API Key</button>
+
     <div class="hbadge">Claude AI</div>
   </div>
 </div>
@@ -951,7 +934,7 @@ input.ip-range{width:100%;accent-color:var(--gold);cursor:pointer;}
 
   <div class="disc">
     Análisis basado en prosodia emocional (Scherer, 2003) · Regla 7-38-55 (Mehrabian) · CNV (Rosenberg) · Modelo asertivo (Alberti & Emmons)<br>
-    Desarrollado por VISORIA Intelligence · <strong>javierrubiano.com</strong> · Versión GitHub Pages
+    Desarrollado por VISORIA Intelligence · <strong>javierrubiano.com</strong> · Versión Web — VISORIA Intelligence
   </div>
 
 </div><!-- /wrap -->
@@ -963,26 +946,9 @@ input.ip-range{width:100%;accent-color:var(--gold);cursor:pointer;}
 // ══════════════════════════════════════════
 var CLAUDE_MODEL = 'claude-sonnet-4-20250514';
 
-function getApiKey() {
-  return localStorage.getItem('vt_api_key') || '';
-}
+// API key not needed — using proxy
 
-function saveApiKey(key) {
-  localStorage.setItem('vt_api_key', key.trim());
-}
 
-function promptApiKey() {
-  var existing = getApiKey();
-  var msg = existing
-    ? 'API Key actual: ...'+existing.slice(-8)+'\n\nPega tu nueva key o deja igual y presiona OK:'
-    : 'Para usar VoiceTone Analyzer necesitas una API Key de Anthropic.\n\nObtén la tuya en: console.anthropic.com\n\nPega tu API Key aquí:';
-  var key = prompt(msg, existing || '');
-  if (key && key.trim().length > 20) {
-    saveApiKey(key.trim());
-    return key.trim();
-  }
-  return existing;
-}
 
 function buildPrompt(mensaje, emocion, vol, speed, tension, pausas, tono, puntaje) {
   return 'Eres un experto en comunicación asertiva, prosodia emocional y neuromarketing del lenguaje. ' +
@@ -1044,36 +1010,39 @@ function buildReadingPrompt(original, reformulacion, vol, speed, tension, pausa,
 // ============================================================
 
 // ── Direct API call (GitHub Pages version) ──
+// ── Proxy URL — set after deploying Cloudflare Worker ──
+var PROXY_URL = 'https://rubivoz.jfrubiano.workers.dev';
+
+async function callProxy(prompt, maxTokens) {
+  var resp = await fetch(PROXY_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: CLAUDE_MODEL,
+      max_tokens: maxTokens,
+      messages: [{ role: 'user', content: prompt }]
+    })
+  });
+  if (!resp.ok) {
+    var err = await resp.text();
+    throw new Error('Error proxy (' + resp.status + '): ' + err);
+  }
+  var data = await resp.json();
+  var text = data.content[0].text.replace(/```json\s*/g,'').replace(/```\s*/g,'').trim();
+  return text;
+}
+
 async function analyzeMessageDirect(payload) {
   var prompt = buildPrompt(
     payload.mensaje, payload.emocion,
     payload.volumen, payload.velocidad, payload.tension, payload.pausas,
     payload.tono, payload.puntaje
   );
-  var resp = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': getApiKey(),
-      'anthropic-version': '2023-06-01',
-      'anthropic-dangerous-direct-browser-access': 'true'
-    },
-    body: JSON.stringify({
-      model: CLAUDE_MODEL,
-      max_tokens: 1500,
-      messages: [{ role: 'user', content: prompt }]
-    })
-  });
-  if (!resp.ok) {
-    var err = await resp.text();
-    return { success: false, error: 'Error API (' + resp.status + '): ' + err };
-  }
-  var data = await resp.json();
-  var text = data.content[0].text.replace(/```json\s*/g,'').replace(/```\s*/g,'').trim();
   try {
+    var text = await callProxy(prompt, 1500);
     return { success: true, analysis: JSON.parse(text) };
   } catch(e) {
-    return { success: false, error: 'JSON parse error: ' + text.slice(0,200) };
+    return { success: false, error: e.message };
   }
 }
 
@@ -1083,30 +1052,11 @@ async function evaluateReadingDirect(payload) {
     payload.volLectura, payload.speedLectura, payload.tensionLectura, payload.pausaLectura,
     payload.emoLectura
   );
-  var resp = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': getApiKey(),
-      'anthropic-version': '2023-06-01',
-      'anthropic-dangerous-direct-browser-access': 'true'
-    },
-    body: JSON.stringify({
-      model: CLAUDE_MODEL,
-      max_tokens: 1200,
-      messages: [{ role: 'user', content: prompt }]
-    })
-  });
-  if (!resp.ok) {
-    var err = await resp.text();
-    return { success: false, error: 'Error API (' + resp.status + '): ' + err };
-  }
-  var data = await resp.json();
-  var text = data.content[0].text.replace(/```json\s*/g,'').replace(/```\s*/g,'').trim();
   try {
+    var text = await callProxy(prompt, 1200);
     return { success: true, evaluation: JSON.parse(text) };
   } catch(e) {
-    return { success: false, error: 'JSON parse error: ' + text.slice(0,200) };
+    return { success: false, error: e.message };
   }
 }
 
@@ -1971,11 +1921,7 @@ document.getElementById('btnAnalyze').addEventListener('click',function(){
   var res=calcTone(vol,speed,tension,pause,selEmo,curId);
 
   // Check API key
-  var apiKey = getApiKey();
-  if (!apiKey || apiKey.length < 20) {
-    showApiKeyScreen();
-    return;
-  }
+
 
   var payload={mensaje:curTxt,emocion:selEmo||'No especificada',volumen:vol,velocidad:speed,tension:tension,pausas:pause,tono:res.label,puntaje:res.score};
   showLoad('Analizando tu comunicación...');
@@ -2693,19 +2639,7 @@ function resetDemoBtn(btn, level){
 // ══════════════════════════════════════════
 // API KEY SCREEN — clean UI instead of prompt
 // ══════════════════════════════════════════
-function showApiKeyScreen(){
-  var screen = document.getElementById('apikeyScreen');
-  var input = document.getElementById('apikeyInput');
-  var existing = getApiKey();
-  if(existing) input.value = existing;
-  screen.style.display = 'flex';
-  setTimeout(function(){ input.focus(); }, 300);
-}
-
-function hideApiKeyScreen(){
-  document.getElementById('apikeyScreen').style.display = 'none';
-}
-
+// API screen removed for public version
 document.getElementById('apikeyBtn').addEventListener('click', function(){
   var val = document.getElementById('apikeyInput').value.trim();
   var err = document.getElementById('apikeyError');
@@ -2722,9 +2656,7 @@ document.getElementById('apikeyBtn').addEventListener('click', function(){
 });
 
 // Allow Enter key in input
-document.getElementById('apikeyInput').addEventListener('keydown', function(e){
-  if(e.key === 'Enter') document.getElementById('apikeyBtn').click();
-});
+
 
 // ══════════════════════════════════════════
 // INIT
@@ -2744,13 +2676,7 @@ window.addEventListener('load', function(){
       getBestVoice();
     });
   }
-  // Show API key screen if not set
-  if (!getApiKey()) {
-    setTimeout(function(){ showApiKeyScreen(); }, 600);
-  } else {
-    var hbtn = document.getElementById('headerKeyBtn');
-    if(hbtn) hbtn.textContent = '⚙ Key ✓';
-  }
+
 });
 </script>
 </body>
